@@ -29,6 +29,30 @@ const channels = [
     }
 ];
 
+
+export const toEmoji = (str: string) =>{
+    if (str === undefined || str === null || str === '') {
+        return str;
+    }
+
+    if (str === '10') {
+        return '🔟';
+    }
+
+    return str
+        .replace(/0/g, '0️⃣')
+        .replace(/1/g, '1️⃣')
+        .replace(/2/g, '2️⃣')
+        .replace(/3/g, '3️⃣')
+        .replace(/4/g, '4️⃣')
+        .replace(/5/g, '5️⃣')
+        .replace(/6/g, '6️⃣')
+        .replace(/7/g, '7️⃣')
+        .replace(/8/g, '8️⃣')
+        .replace(/9/g, '9️⃣');
+}
+
+
 export interface ChannelConversation {
     id?: number;
     channel: string;
@@ -46,9 +70,11 @@ interface ChannelUser {
 }
 
 interface AttachmentData {
-    attachmentData: string;
-    attachmentType: string;
-    attachmentFilename: string;
+    data: string;
+    caption: string;
+    contentType: string;
+    filename: string;
+    size: number;
 }
 
 const url = "http://localhost:8080";
@@ -105,18 +131,15 @@ function App() {
         } catch (e) {
         }
     }
-    async function postUpload(channelUser: ChannelUser, attachmentData: AttachmentData) {
+    async function postUpload(channelUser: ChannelUser, attachment: AttachmentData) {
         try {
             const response = await fetch(`${url}/webhooks/debug`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    "message": {
-                        "type": "raw",
-                        "message": attachmentData
-                    },
+                    "message": {attachment: attachment, "type": "attachment"},
                     "channel": channelUser.channel,
-                    "session": channelUser.user,
+                    "session": `${channelUser.user}-${channelUser.channel}`,
                     "user": channelUser.user,
 
                 })
@@ -140,18 +163,18 @@ function App() {
         await fetchConversation(channelData);
     }
 
-    async function postAndUploadFile(channelData: ChannelUser, attachmentData: AttachmentData){
+    async function postAndUploadFile(channelData: ChannelUser, attachment: AttachmentData){
         const current : ChannelConversation = {
             id: conversationData.length + 1,
             channel: channelData.channel,
-            message: JSON.stringify({type: "raw", message: attachmentData }),
+            message: JSON.stringify( {attachment, "type": "attachment"}),
             session: channelData.user,
             user: channelData.user,
             direction: "OUTGOING",
             sessionState: "con"
         }
         setConversationData([...conversationData, current]);
-        await postUpload(channelData, attachmentData);
+        await postUpload(channelData, attachment);
         await fetchConversation(channelData);
     }
 
@@ -176,9 +199,9 @@ function App() {
             html.push(message.text);
             html.push("\n");
             for(const choice of message.choices){
-                html.push(choice.name)
+                html.push(toEmoji(choice.name));
                 html.push(" ");
-                html.push(choice.text)
+                html.push(choice.text);
                 html.push("\n");
             }
             return <
@@ -253,11 +276,31 @@ function App() {
             }
             />
         }
-        if( message.type == "raw"){
 
-            if( message.channel ==='whatsapp' && message.message && message.message.action && message.message.action.buttons){
-                const currentMessage = message.message;
-                const buttons =  message.message.action.buttons.map((button: any)=>{
+        if( message.type  =='attachment' && message.attachment){
+            return <
+                Message key={conversation.id}  model={{
+                message: conversation.message,
+                payload:
+                    <Message.CustomContent>
+                        <FontAwesomeIcon height={30} width={30} icon={faFile} />    {message.attachment.contentType}
+                        <br/>
+                        <i>{message.attachment.filename}</i>
+                        <br/>
+                    </Message.CustomContent>,
+                sentTime: "just now",
+                sender: "Bot",
+                direction: (conversation.direction === 'INCOMING'? 'incoming': 'outgoing'),
+                position: "single"
+            }
+            }
+            />
+        }
+        if( message.type == "raw" && message.raw){
+
+            if( message.channel ==='whatsapp' && message.raw.action && message.raw.action.buttons){
+                const raw = message.raw;
+                const buttons =  message.raw.action.buttons.map((button: any)=>{
                     if( button.type ==='reply') {
                         return(<Button style={{ color: "black", background: "white" }} onClick={()=>{
                             postAndFetch(userData, button.reply.id).then(()=>{}).catch(e=>{
@@ -274,9 +317,9 @@ function App() {
                     {
                         message: conversation.message,
                         payload: <Message.CustomContent>
-                            <Message.ImageContent src={currentMessage.header.image.link} height={30} width={30}/>
+                            <Message.ImageContent src={raw.header.image.link} height={30} width={30}/>
                             <br/>
-                            {currentMessage.body.text}
+                            {raw.body.text}
                             <br/>
                             {buttons}
                         </Message.CustomContent>,
@@ -288,27 +331,6 @@ function App() {
                 }
                 />
             }
-            if(message.message.attachmentData){
-                return <
-                    Message key={conversation.id}  model={{
-                    message: conversation.message,
-                    payload:
-                        <Message.CustomContent>
-                        <FontAwesomeIcon height={30} width={30} icon={faFile} />    {message.message.attachmentType}
-                        <br/>
-                            <i>{message.message.attachmentFilename}</i>
-                        <br/>
-
-                    </Message.CustomContent>,
-                    sentTime: "just now",
-                    sender: "Bot",
-                    direction: (conversation.direction === 'INCOMING'? 'incoming': 'outgoing'),
-                    position: "single"
-                }
-                }
-                />
-            }
-
             return <
                 Message key={conversation.id}  model={{
                     message: conversation.message,
@@ -442,15 +464,19 @@ function App() {
                                         const content = e.target.result;
 
                                         postAndUploadFile(userData, {
-                                            attachmentData: content,
-                                            attachmentFilename: file.name,
-                                            attachmentType: file.type
-                                        }).then(()=>{}).catch(e=>{
+                                            data: content,
+                                            caption: message,
+                                            filename: file.name,
+                                            contentType: file.type,
+                                            size: file.size
+                                        }).then(() => {
+                                            if (inputFile.current) {
+                                                inputFile.current.value = ''
+                                            }
+                                        }).catch(e => {
                                             console.log(e);
                                         })
-                                        if(inputFile.current) {
-                                            inputFile.current.value = ''
-                                        }
+
                                     };
                                     reader.onerror = function (e: any) {
                                         console.error("Error reading file", e.target.error);
